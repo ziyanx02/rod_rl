@@ -26,6 +26,7 @@ from train_env_knotting import Train_Env_Knotting
 from train_env_gathering import Train_Env_Gathering
 from train_env_separation import Train_Env_Separation
 from train_env_wireart import Train_Env_Wireart
+from train_env_lifting import Train_Env_Lifting
 
 class CriticNetwork(nn.Module):
     def __init__(self, input_shape, output_shape, n_features, **kwargs):
@@ -101,6 +102,8 @@ def experiment(alg, n_envs, n_epochs, n_steps, n_steps_per_fit, n_episodes_test,
         mdp = Train_Env_Separation(n_envs=n_envs, GUI=False)
     elif env_name == "wireart":
         mdp = Train_Env_Wireart(n_envs=n_envs, GUI=False)
+    elif env_name == "lifting":
+        mdp = Train_Env_Lifting(n_envs=n_envs, GUI=False)
     else:
         raise ValueError(f"Unknown env_name: {env_name}")
 

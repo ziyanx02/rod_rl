@@ -283,7 +283,7 @@ def parse_glb_tree(glb, node_index):
         mesh_list += sub_mesh_list
     if non_identity:
         for _, mesh_transform in mesh_list:
-            mesh_transform @= transform
+            mesh_transform = mesh_transform @ transform
 
     if node.mesh is not None:
         mesh_list.append([node.mesh, transform])

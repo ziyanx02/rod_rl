@@ -21,6 +21,7 @@ from train_env_gathering import Train_Env_Gathering
 from train_env_separation import Train_Env_Separation
 from train_env_wireart import Train_Env_Wireart
 from train_env_wrapping import Train_Env_Wrapping
+from train_env_lifting import Train_Env_Lifting
 
 class Network(nn.Module):
     def __init__(self, input_shape, output_shape, n_features, **kwargs):
@@ -82,6 +83,10 @@ def experiment(alg, n_envs,n_epochs, n_steps, n_steps_per_fit, n_episodes_test,
         mdp = Train_Env_Wireart(n_envs=n_envs, GUI=False)
     elif env_name == "wrapping":
         mdp = Train_Env_Wrapping(n_envs=n_envs, GUI=False)
+    elif env_name == "lifting":
+        mdp = Train_Env_Lifting(n_envs=n_envs, GUI=True)
+    else:
+        raise ValueError(f"Unknown env_name: {env_name}")
 
     critic_params = dict(network=Network,
                          optimizer={'class': optim.Adam,
