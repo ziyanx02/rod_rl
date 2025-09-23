@@ -1,4 +1,5 @@
 import torch
+import argparse
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -6,12 +7,20 @@ import torch.optim as optim
 from tqdm import trange
 
 from mushroom_rl.core import VectorCore, Logger
-from mushroom_rl.algorithms.actor_critic import RudinPPO
+from mushroom_rl.algorithms.actor_critic import PPO
 
 from mushroom_rl.policy import GaussianTorchPolicy
 from mushroom_rl.utils import TorchUtils
 
 from train_env_wiring_ring import Train_Env_Wiring_ring
+from train_env_wiring_post import Train_Env_Wiring_post
+from train_env_coiling import Train_Env_Coiling
+from train_env_slingshot import Train_Env_Slingshot
+from train_env_knotting import Train_Env_Knotting
+from train_env_gathering import Train_Env_Gathering
+from train_env_separation import Train_Env_Separation
+from train_env_wireart import Train_Env_Wireart
+from train_env_wrapping import Train_Env_Wrapping
 
 class Network(nn.Module):
     def __init__(self, input_shape, output_shape, n_features, **kwargs):
@@ -49,14 +58,31 @@ class Network(nn.Module):
         return a
 
 def experiment(alg, n_envs,n_epochs, n_steps, n_steps_per_fit, n_episodes_test,
-               alg_params, policy_params):
+               alg_params, policy_params, env_name="wiring_ring"):
 
     logger = Logger(alg.__name__ + "_1_legged_gym", results_dir="./logs/", log_console=True, use_timestamp=True)
     logger.strong_line()
     logger.info('Experiment Algorithm: ' + alg.__name__)
 
-    mdp = Train_Env_Wiring_ring(n_envs=n_envs, GUI=True)
-    
+    if env_name == "wiring_ring":
+        mdp = Train_Env_Wiring_ring(n_envs=n_envs, GUI=False)
+    elif env_name == "wiring_post":
+        mdp = Train_Env_Wiring_post(n_envs=n_envs, GUI=False)
+    elif env_name == "coiling":
+        mdp = Train_Env_Coiling(n_envs=n_envs, GUI=False)
+    elif env_name == "slingshot":
+        mdp = Train_Env_Slingshot(n_envs=n_envs, GUI=False)
+    elif env_name == "knotting":
+        mdp = Train_Env_Knotting(n_envs=n_envs, GUI=False)
+    elif env_name == "gathering":
+        mdp = Train_Env_Gathering(n_envs=n_envs, GUI=False)
+    elif env_name == "separation":
+        mdp = Train_Env_Separation(n_envs=n_envs, GUI=False)
+    elif env_name == "wireart":
+        mdp = Train_Env_Wireart(n_envs=n_envs, GUI=False)
+    elif env_name == "wrapping":
+        mdp = Train_Env_Wrapping(n_envs=n_envs, GUI=False)
+
     critic_params = dict(network=Network,
                          optimizer={'class': optim.Adam,
                                     'params': {'lr': 1e-3}},
@@ -105,6 +131,10 @@ def experiment(alg, n_envs,n_epochs, n_steps, n_steps_per_fit, n_episodes_test,
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--env_name', type=str, default='wiring_ring', help='Environment name: wiring_ring or wiring_post')
+    args = parser.parse_args()
+
     # Enforce float32 globally for new tensors/modules
     torch.set_default_dtype(torch.float32)
     TorchUtils.set_default_device('cuda:0')
@@ -123,5 +153,5 @@ if __name__ == '__main__':
         n_features=[512, 256, 128],
         use_cuda=True
     )
-    experiment(alg=RudinPPO, n_envs=n_envs, n_epochs=40, n_steps=n_envs*24*50, n_steps_per_fit=n_envs*24,
-        n_episodes_test=256, alg_params=ppo_params, policy_params=policy_params)
+    experiment(alg=PPO, n_envs=n_envs, n_epochs=40, n_steps=n_envs*24*50, n_steps_per_fit=n_envs*24,
+        n_episodes_test=256, alg_params=ppo_params, policy_params=policy_params, env_name=args.env_name)

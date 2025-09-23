@@ -152,31 +152,20 @@ class Train_Env_Wiring_ring(Train_Env):
         return obs_rope
 
     def reset_all(self, env_mask, state=None):
-        # Reset control vertices of masked envs to initial rope layout
-        if isinstance(env_mask, torch.Tensor):
-            env_mask = env_mask.detach().to('cpu').numpy().astype(bool)
-        else:
-            env_mask = np.asarray(env_mask, dtype=bool)
+        self.scene.reset()
 
-        verts_rope = self.rope.get_all_verts()
-        current_ctrl = verts_rope[:, self.control_idx]  # (n_envs, n_ctrl, 3)
-        target_ctrl = current_ctrl.copy()
-
-        # Compute initial anchors along +X axis using indices
-        anchors = []
-        for idx in self.control_idx:
-            anchor = self._rope_base_pos.copy()
-            anchor[0] += self._rope_interval * idx
-            anchors.append(anchor)
-        anchors = np.stack(anchors, axis=0).astype(np.float32)  # (n_ctrl, 3)
-
-        target_ctrl[env_mask] = anchors  # broadcast to masked envs
-
-        for k, vi in enumerate(self.control_idx):
-            self.rope.set_pos_single(target_ctrl[:, k], vi)
-
-        for _ in range(5):
-            self.scene.step()
+        # Fix control vertices across all envs for direct kinematic control
+        fixed_np = np.zeros((self.n_envs, self.rope.n_vertices), dtype=bool)
+        fixed_np[:, self.control_idx] = True
+        self.rope.set_fixed(0, fixed_np)
+        fixed_ring1 = np.zeros((self.n_envs, self.ring1.n_vertices), dtype=bool)
+        fixed_ring1[:, :] = True
+        self.ring1.set_fixed(0, fixed_ring1)
+        fixed_ring2 = np.zeros((self.n_envs, self.ring2.n_vertices), dtype=bool)
+        fixed_ring2[:, :] = True
+        self.ring2.set_fixed(0, fixed_ring2)
+        
+        self.scene.step()
 
         obs = self._compute_observation()
         return obs, [{}] * self.n_envs
@@ -222,18 +211,15 @@ class Train_Env_Wiring_ring(Train_Env):
 
             interp = (j + 1) / self._steps_per_action
             target_ctrl = current_ctrl + masked_delta * interp
+            target_ctrl[:, :, 2] = np.clip(target_ctrl[:, :, 2], 0.01, None)
             for k, vi in enumerate(self.control_idx):
                 self.rope.set_pos_single(target_ctrl[:, k], vi)
             self.scene.step()
 
             # Collision detection on control vertices
-            try:
-                collided = self.rope._solver.vertices_ng.is_collided.to_numpy()  # (n_envs, n_vertices)
-                verts_to_check = np.array(self.control_idx) + self.rope._v_start
-                collided_ctrl = collided[:, verts_to_check].any(axis=1)
-            except Exception:
-                # If internal flags unavailable, skip collision detection gracefully
-                collided_ctrl = np.zeros((self.n_envs,), dtype=bool)
+            collided = self.rope._solver.vertices_ng.is_collided.to_numpy()  # (n_envs, n_vertices)
+            verts_to_check = np.array(self.control_idx) + self.rope._v_start
+            collided_ctrl = collided[:, verts_to_check].any(axis=1)
 
             newly_collided = collided_ctrl & alive
             if newly_collided.any():

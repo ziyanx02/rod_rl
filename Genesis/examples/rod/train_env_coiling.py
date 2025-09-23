@@ -1,17 +1,39 @@
 import genesis as gs
-import imageio
 import torch
 import numpy as np
-from scipy.spatial.transform import Rotation as R
-import os 
-import json
-import matplotlib.pyplot as plt
 from train_env import Train_Env
-from ring_crossing_helper import ring_crossing_count_axis_aligned, ring_center_from_axis_aligned_vertices, closest_distance_rope_to_point
+from mushroom_rl.core import MDPInfo
+from mushroom_rl.rl_utils.spaces import Box
 
 class Train_Env_Coiling(Train_Env):
-    def __init__(self, task='wiring', log_dir="xxx/wiring", n_envs=5):
-        super().__init__(task, n_envs=n_envs, log_dir=log_dir)
+    def __init__(self, task='wiring', log_dir="xxx/wiring", n_envs=5, GUI=False):
+        # Control vertices (two points on the rope)
+        self.control_idx = [1, 43]
+
+        super().__init__(task, n_envs=n_envs, log_dir=log_dir, GUI=GUI)
+
+        # RL/vectorized env configuration (similar to Train_Env_Wiring_ring)
+        self._backend = 'numpy'
+
+        # Observation / action specs
+        self._obs_dim = 60 * 3  # n_vertices * 3
+        self._act_dim = len(self.control_idx) * 3  # n_ctrl * 3
+        self._horizon = 200
+        self._steps_per_action = 10
+
+        # Observation/action spaces
+        low_obs = np.full((self._obs_dim,), -np.inf, dtype=np.float32)
+        high_obs = np.full((self._obs_dim,), np.inf, dtype=np.float32)
+        observation_space = Box(low_obs, high_obs)
+
+        act_limit = 0.02
+        low_act = -np.ones((self._act_dim,), dtype=np.float32) * act_limit
+        high_act = np.ones((self._act_dim,), dtype=np.float32) * act_limit
+        action_space = Box(low_act, high_act)
+
+        # Control dt approximates sim dt * internal steps
+        control_dt = self.scene.sim_options.dt * self._steps_per_action
+        self._mdp_info = MDPInfo(observation_space, action_space, gamma=0.99, horizon=self._horizon, dt=control_dt, backend=self._backend)
 
     def construct_scene(self):
         plane = self.scene.add_entity(
@@ -60,13 +82,125 @@ class Train_Env_Coiling(Train_Env):
 
         self.scene.rod_solver.register_gripper_geom_indices([])
 
+        # Record rope initial layout for resets
+        self._rope_base_pos = np.array([-0.6, 0.265, 0.005], dtype=np.float32)
+        self._rope_interval = 0.02
+        self._rope_axis = 'x'
+
         self.scene.build(n_envs=self.n_envs, env_spacing=(1, 1))
 
-        self.control_idx = [1, 43]
-        self.action_dim = len(self.control_idx) * 3
+        # Fix control vertices across all envs for direct kinematic control
+        fixed_np = np.zeros((self.n_envs, self.rope.n_vertices), dtype=bool)
+        fixed_np[:, self.control_idx] = True
+        self.rope.set_fixed(0, fixed_np)
+
+    # ------------------------- MushroomRL Vectorized Environment API -------------------------
+    @property
+    def info(self):
+        return self._mdp_info
+
+    @property
+    def number(self):
+        return self.n_envs
+
+    def _compute_observation(self):
+        verts_rope = self.rope.get_all_verts()  # (n_envs, n_vertices, 3)
+        obs_rope = verts_rope.reshape(self.n_envs, -1).astype(np.float32)
+        return obs_rope
+
+    def reset_all(self, env_mask, state=None):
+        self.scene.reset()
+
+        # Fix control vertices across all envs for direct kinematic control
+        fixed_np = np.zeros((self.n_envs, self.rope.n_vertices), dtype=bool)
+        fixed_np[:, self.control_idx] = True
+        self.rope.set_fixed(0, fixed_np)
+
+        self.scene.step()
+
+        obs = self._compute_observation()
+        return obs, [{}] * self.n_envs
+
+    def step_all(self, env_mask, action):
+        # Accept torch or numpy; operate and return numpy for numpy backend
+        if isinstance(action, torch.Tensor):
+            action = action.detach().to('cpu').numpy()
+        else:
+            action = np.asarray(action)
+        if isinstance(env_mask, torch.Tensor):
+            env_mask_np = env_mask.detach().to('cpu').numpy().astype(bool)
+        else:
+            env_mask_np = np.asarray(env_mask, dtype=bool)
+
+        # Clip actions and reshape to (n_envs, n_ctrl, 3)
+        action = action.astype(np.float32)
+        action = np.clip(action, self._mdp_info.action_space.low, self._mdp_info.action_space.high)
+        delta = action.reshape(self.n_envs, -1, 3)
+
+        verts_rope = self.rope.get_all_verts()
+        current_ctrl = verts_rope[:, self.control_idx]  # (n_envs, n_ctrl, 3)
+
+        # Zero-out actions for non-masked envs
+        masked_delta = np.zeros_like(delta, dtype=np.float32)
+        masked_delta[env_mask_np] = delta[env_mask_np]
+
+        # Track failure states and absorbing flags (only track masked envs)
+        absorbing = np.zeros((self.n_envs,), dtype=bool)
+        tracked = env_mask_np.copy()
+        alive = tracked.copy()
+
+        # Pre-step NaN detection before any micro-step of this macro-step
+        nan_now = np.isnan(verts_rope).any(axis=(1, 2))
+        newly_nan = nan_now & alive
+        if newly_nan.any():
+            absorbing[newly_nan] = True
+            alive[newly_nan] = False
+
+        for j in range(self._steps_per_action):
+            if not (alive & tracked).any():
+                break
+
+            interp = (j + 1) / self._steps_per_action
+            target_ctrl = current_ctrl + masked_delta * interp
+            target_ctrl[:, :, 2] = np.clip(target_ctrl[:, :, 2], 0.01, None)
+            for k, vi in enumerate(self.control_idx):
+                self.rope.set_pos_single(target_ctrl[:, k], vi)
+            self.scene.step()
+
+            # Collision detection on control vertices
+            collided = self.rope._solver.vertices_ng.is_collided.to_numpy()  # (n_envs, n_vertices)
+            verts_to_check = np.array(self.control_idx) + self.rope._v_start
+            collided_ctrl = collided[:, verts_to_check].any(axis=1)
+
+            newly_collided = collided_ctrl & alive
+            if newly_collided.any():
+                absorbing[newly_collided] = True
+                alive[newly_collided] = False
+
+            # NaN detection after stepping
+            verts_rope_post = self.rope.get_all_verts()
+            nan_after = np.isnan(verts_rope_post).any(axis=(1, 2))
+            newly_nan_after = nan_after & alive
+            if newly_nan_after.any():
+                absorbing[newly_nan_after] = True
+                alive[newly_nan_after] = False
+
+        next_obs = self._compute_observation()
+
+        rewards = np.array(self.reward(), dtype=np.float32)
+
+        return next_obs, rewards, absorbing, [{}] * self.n_envs
+
+    def render_all(self, env_mask, record=False):
+        if self.GUI:
+            pass
+        if record:
+            return np.zeros((720, 1280, 3), dtype=np.uint8)
+        return None
 
     def reward(self):
-        verts_batch = self.rope.get_all_verts()   # shape: (n_envs, n_verts, 3), NumPy array
+        # [n_envs, n_verts, 3]
+        verts_batch = self.rope.get_all_verts()
         point = np.array([0.0, 0.0, 0.15], dtype=verts_batch.dtype)
 
         # Euclidean distance from each vertex to the point
