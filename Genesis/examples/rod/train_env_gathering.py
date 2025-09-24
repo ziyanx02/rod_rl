@@ -252,6 +252,9 @@ class Train_Env_Gathering(Train_Env):
         raise NotImplementedError()
         # to be done
 
+    def stop(self):
+        pass
+
     def eval_traj(self, trajs):
         """
         Evaluate trajectories.

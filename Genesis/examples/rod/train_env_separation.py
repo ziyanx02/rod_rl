@@ -228,6 +228,9 @@ class Train_Env_Separation(Train_Env):
         raise NotImplementedError()
         # to be done
 
+    def stop(self):
+        pass
+
     def eval_traj(self, trajs):
         """
         Evaluate trajectories.

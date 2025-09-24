@@ -64,9 +64,9 @@ class Network(nn.Module):
 def experiment(alg, n_envs,n_epochs, n_steps, n_steps_per_fit, n_episodes_test,
                alg_params, policy_params, env_name="wiring_ring"):
 
-    logger = Logger(alg.__name__ + "_1_legged_gym", results_dir="./logs/", log_console=True, use_timestamp=True)
-    logger.strong_line()
-    logger.info('Experiment Algorithm: ' + alg.__name__)
+    # logger = Logger(alg.__name__ + "_1_legged_gym", results_dir="./logs/", log_console=True, use_timestamp=True)
+    # logger.strong_line()
+    # logger.info('Experiment Algorithm: ' + alg.__name__)
 
     if env_name == "wiring_ring":
         mdp = Train_Env_Wiring_ring(n_envs=n_envs, GUI=False)
@@ -87,7 +87,7 @@ def experiment(alg, n_envs,n_epochs, n_steps, n_steps_per_fit, n_episodes_test,
     elif env_name == "wrapping":
         mdp = Train_Env_Wrapping(n_envs=n_envs, GUI=False)
     elif env_name == "lifting":
-        mdp = Train_Env_Lifting(n_envs=n_envs, GUI=True)
+        mdp = Train_Env_Lifting(n_envs=n_envs, GUI=False)
     else:
         raise ValueError(f"Unknown env_name: {env_name}")
 
@@ -103,7 +103,7 @@ def experiment(alg, n_envs,n_epochs, n_steps, n_steps_per_fit, n_episodes_test,
             exp_id += 1
         return exp_id
 
-    curve_dir = Path("logs") / "curve" / env_name
+    curve_dir = Path("logs") / "curve" / env_name / "PPO"
     curve_dir.mkdir(parents=True, exist_ok=True)
     exp_id = _get_min_unused_exp_id(curve_dir)
     curve_path = curve_dir / f"{exp_id}.txt"
@@ -137,10 +137,13 @@ def experiment(alg, n_envs,n_epochs, n_steps, n_steps_per_fit, n_episodes_test,
     E = agent.policy.entropy().to("cpu").item()
     V = torch.mean(agent._V(dataset.get_init_states())).cpu().item()
 
-    logger.epoch_info(0, J=J, R=R, entropy=E, V=V)
+    # logger.epoch_info(0, J=J, R=R, entropy=E, V=V)
+    curve_file.write(f"{0},{R}\n")
+    curve_file.flush()
+    os.fsync(curve_file.fileno())
+
     print("Starting training")
     for it in trange(n_epochs, leave=False):
-        print(it)
         core.learn(n_steps=n_steps, n_steps_per_fit=n_steps_per_fit)
         if (it + 1) % 5 == 0 or it == n_epochs - 1:
             dataset = core.evaluate(n_episodes=n_episodes_test, render=True, record=True)
@@ -152,9 +155,7 @@ def experiment(alg, n_envs,n_epochs, n_steps, n_steps_per_fit, n_episodes_test,
         E = agent.policy.entropy().to("cpu").item()
         V = torch.mean(agent._V(dataset.get_init_states())).cpu().item()
 
-        print(R)
-
-        logger.epoch_info(it+1, J=J, R=R, entropy=E, V=V)
+        # logger.epoch_info(it+1, J=J, R=R, entropy=E, V=V)
 
         # Log reward for this iteration to curve file
         curve_file.write(f"{it+1},{R}\n")
@@ -175,7 +176,7 @@ if __name__ == '__main__':
     # Enforce float32 globally for new tensors/modules
     torch.set_default_dtype(torch.float32)
     TorchUtils.set_default_device('cuda:0')
-    n_envs = 2
+    n_envs = 10
     ppo_params = dict(
         actor_optimizer={'class': optim.Adam,
         'params': {'lr': 1e-3}},
@@ -190,5 +191,5 @@ if __name__ == '__main__':
         n_features=[512, 256, 128],
         use_cuda=True
     )
-    experiment(alg=PPO, n_envs=n_envs, n_epochs=40, n_steps=n_envs*24*50, n_steps_per_fit=n_envs*24,
+    experiment(alg=PPO, n_envs=n_envs, n_epochs=20, n_steps=n_envs*250, n_steps_per_fit=n_envs*10,
         n_episodes_test=n_envs, alg_params=ppo_params, policy_params=policy_params, env_name=args.env_name)

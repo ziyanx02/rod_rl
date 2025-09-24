@@ -82,9 +82,9 @@ class ActorNetwork(nn.Module):
         return a
 
 def experiment(alg, n_envs, n_epochs, n_steps, n_steps_per_fit, n_episodes_test, env_name="wiring_ring"):
-    logger = Logger(alg.__name__, results_dir='./logs', log_console=True, use_timestamp=True)
-    logger.strong_line()
-    logger.info('Experiment Algorithm: ' + alg.__name__)
+    # logger = Logger(alg.__name__, results_dir='./logs', log_console=True, use_timestamp=True)
+    # logger.strong_line()
+    # logger.info('Experiment Algorithm: ' + alg.__name__)
 
     # MDP selection
     if env_name == "wiring_ring":
@@ -120,7 +120,7 @@ def experiment(alg, n_envs, n_epochs, n_steps, n_steps_per_fit, n_episodes_test,
             exp_id += 1
         return exp_id
 
-    curve_dir = Path("logs") / "curve" / env_name
+    curve_dir = Path("logs") / "curve" / env_name / "sac"
     curve_dir.mkdir(parents=True, exist_ok=True)
     exp_id = _get_min_unused_exp_id(curve_dir)
     curve_path = curve_dir / f"{exp_id}.txt"
@@ -178,7 +178,10 @@ def experiment(alg, n_envs, n_epochs, n_steps, n_steps_per_fit, n_episodes_test,
     R = np.mean(dataset.undiscounted_return)
     E = agent.policy.entropy(dataset.state).item()
 
-    logger.epoch_info(0, J=J, R=R, entropy=E)
+    # logger.epoch_info(0, J=J, R=R, entropy=E)
+    curve_file.write(f"{0},{R}\n")
+    curve_file.flush()
+    os.fsync(curve_file.fileno())
 
     # Warmup
     core.learn(n_steps=initial_replay_size, n_steps_per_fit=initial_replay_size)
@@ -192,7 +195,7 @@ def experiment(alg, n_envs, n_epochs, n_steps, n_steps_per_fit, n_episodes_test,
         R = np.mean(dataset.undiscounted_return)
         E = agent.policy.entropy(dataset.state).item()
 
-        logger.epoch_info(n+1, J=J, R=R, entropy=E)
+        # logger.epoch_info(n+1, J=J, R=R, entropy=E)
 
         # Log reward for this iteration to curve file
         curve_file.write(f"{n+1},{R}\n")
@@ -207,8 +210,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--env_name', type=str, default='wiring_ring',
                         help='Environment name: wiring_ring, wiring_post, coiling, slingshot, knotting, gathering, separation, wireart')
-    parser.add_argument('--n_envs', type=int, default=2)
-    parser.add_argument('--epochs', type=int, default=40)
+    parser.add_argument('--n_envs', type=int, default=10)
+    parser.add_argument('--epochs', type=int, default=20)
     args = parser.parse_args()
 
     # Enforce float32 globally for new tensors/modules
@@ -220,8 +223,8 @@ if __name__ == '__main__':
         alg=SAC,
         n_envs=n_envs,
         n_epochs=args.epochs,
-        n_steps=n_envs*24*50,
-        n_steps_per_fit=n_envs*24,
-        n_episodes_test=256,
+        n_steps=n_envs*250,
+        n_steps_per_fit=n_envs*10,
+        n_episodes_test=n_envs,
         env_name=args.env_name
     )
