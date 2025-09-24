@@ -3,6 +3,9 @@ import argparse
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import numpy as np
+import os
+from pathlib import Path
 
 from tqdm import trange
 
@@ -88,6 +91,24 @@ def experiment(alg, n_envs,n_epochs, n_steps, n_steps_per_fit, n_episodes_test,
     else:
         raise ValueError(f"Unknown env_name: {env_name}")
 
+    # Prepare curve logging file: logs/curve/<env_name>/<EXP_ID>
+    def _get_min_unused_exp_id(directory: Path) -> int:
+        existing_ids = set()
+        if directory.exists():
+            for child in directory.iterdir():
+                if child.is_file() and child.suffix == ".txt" and child.stem.isdigit():
+                    existing_ids.add(int(child.stem))
+        exp_id = 0
+        while exp_id in existing_ids:
+            exp_id += 1
+        return exp_id
+
+    curve_dir = Path("logs") / "curve" / env_name
+    curve_dir.mkdir(parents=True, exist_ok=True)
+    exp_id = _get_min_unused_exp_id(curve_dir)
+    curve_path = curve_dir / f"{exp_id}.txt"
+    curve_file = open(curve_path, "w")
+
     critic_params = dict(network=Network,
                          optimizer={'class': optim.Adam,
                                     'params': {'lr': 1e-3}},
@@ -109,30 +130,41 @@ def experiment(alg, n_envs,n_epochs, n_steps, n_steps_per_fit, n_episodes_test,
 
     core = VectorCore(agent, mdp)
     
-    dataset = core.evaluate(n_episodes=n_episodes_test, render=True, record=True)
+    dataset = core.evaluate(n_episodes=n_episodes_test, render=False, record=False)
 
-    J = torch.mean(dataset.discounted_return).to("cpu").item()
-    R = torch.mean(dataset.undiscounted_return.to("cpu")).item()
+    J = np.mean(dataset.discounted_return)
+    R = np.mean(dataset.undiscounted_return)
     E = agent.policy.entropy().to("cpu").item()
-    V = torch.mean(agent._V(dataset.get_init_states())).detach().to("cpu").item()
+    V = torch.mean(agent._V(dataset.get_init_states())).cpu().item()
 
     logger.epoch_info(0, J=J, R=R, entropy=E, V=V)
     print("Starting training")
     for it in trange(n_epochs, leave=False):
+        print(it)
         core.learn(n_steps=n_steps, n_steps_per_fit=n_steps_per_fit)
         if (it + 1) % 5 == 0 or it == n_epochs - 1:
             dataset = core.evaluate(n_episodes=n_episodes_test, render=True, record=True)
         else:
             dataset = core.evaluate(n_episodes=n_episodes_test, render=False, record=False)
 
-        J = torch.mean(dataset.discounted_return).to("cpu").item()
-        R = torch.mean(dataset.undiscounted_return).to("cpu").item()
+        J = np.mean(dataset.discounted_return)
+        R = np.mean(dataset.undiscounted_return)
         E = agent.policy.entropy().to("cpu").item()
-        V = torch.mean(agent._V(dataset.get_init_states())).detach().to("cpu").item()
+        V = torch.mean(agent._V(dataset.get_init_states())).cpu().item()
+
+        print(R)
 
         logger.epoch_info(it+1, J=J, R=R, entropy=E, V=V)
 
+        # Log reward for this iteration to curve file
+        curve_file.write(f"{it+1},{R}\n")
+        curve_file.flush()
+        os.fsync(curve_file.fileno())
+
         del dataset
+
+    # Close curve file after training
+    curve_file.close()
 
 
 if __name__ == '__main__':
@@ -159,4 +191,4 @@ if __name__ == '__main__':
         use_cuda=True
     )
     experiment(alg=PPO, n_envs=n_envs, n_epochs=40, n_steps=n_envs*24*50, n_steps_per_fit=n_envs*24,
-        n_episodes_test=256, alg_params=ppo_params, policy_params=policy_params, env_name=args.env_name)
+        n_episodes_test=n_envs, alg_params=ppo_params, policy_params=policy_params, env_name=args.env_name)

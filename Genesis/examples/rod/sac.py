@@ -6,6 +6,7 @@ import argparse
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from pathlib import Path
 
 from tqdm import trange
 
@@ -107,6 +108,24 @@ def experiment(alg, n_envs, n_epochs, n_steps, n_steps_per_fit, n_episodes_test,
     else:
         raise ValueError(f"Unknown env_name: {env_name}")
 
+    # Prepare curve logging file: logs/curve/<env_name>/<EXP_ID>.txt
+    def _get_min_unused_exp_id(directory: Path) -> int:
+        existing_ids = set()
+        if directory.exists():
+            for child in directory.iterdir():
+                if child.is_file() and child.suffix == ".txt" and child.stem.isdigit():
+                    existing_ids.add(int(child.stem))
+        exp_id = 0
+        while exp_id in existing_ids:
+            exp_id += 1
+        return exp_id
+
+    curve_dir = Path("logs") / "curve" / env_name
+    curve_dir.mkdir(parents=True, exist_ok=True)
+    exp_id = _get_min_unused_exp_id(curve_dir)
+    curve_path = curve_dir / f"{exp_id}.txt"
+    curve_file = open(curve_path, "w")
+
     # Genesis env initialization may set torch default dtype to float64;
     # re-enforce float32 before building networks/agent to avoid dtype mismatch.
     torch.set_default_dtype(torch.float32)
@@ -174,6 +193,14 @@ def experiment(alg, n_envs, n_epochs, n_steps, n_steps_per_fit, n_episodes_test,
         E = agent.policy.entropy(dataset.state).item()
 
         logger.epoch_info(n+1, J=J, R=R, entropy=E)
+
+        # Log reward for this iteration to curve file
+        curve_file.write(f"{n+1},{R}\n")
+        curve_file.flush()
+        os.fsync(curve_file.fileno())
+
+    # Close curve file after training
+    curve_file.close()
 
 
 if __name__ == '__main__':

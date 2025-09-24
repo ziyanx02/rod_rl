@@ -24,7 +24,7 @@ class Train_Env_Gathering(Train_Env):
         # Observation / action specs
         self._obs_dim = 45 * 3  # n_vertices * 3
         self._act_dim = len(self.control_idx) * 3  # n_ctrl * 3
-        self._horizon = 200
+        self._horizon = 250
         self._steps_per_action = 10
 
         # Observation/action spaces

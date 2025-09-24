@@ -24,7 +24,7 @@ class Train_Env_Lifting(Train_Env):
         # Rope has 30 vertices (set in construct_scene), each with xyz
         self._obs_dim = 30 * 3
         self._act_dim = len(self.control_idx) * 3
-        self._horizon = 200
+        self._horizon = 250
         self._steps_per_action = 10
 
         # Observation/action spaces

@@ -24,7 +24,7 @@ class Train_Env_Knotting(Train_Env):
         # Observation / action specs
         self._obs_dim = 70 * 3  # n_vertices * 3 (matches construct_scene)
         self._act_dim = len(self.control_idx) * 3  # n_ctrl * 3
-        self._horizon = 200
+        self._horizon = 250
         self._steps_per_action = 10
 
         # Observation/action spaces
